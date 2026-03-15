@@ -126,9 +126,19 @@ erDiagram
         bigint id PK
         text body
         string type "text | image"
+        string status "sent | delivered | read"
+        string client_id UK "UUID from client for dedup"
         bigint user_id FK
         bigint room_id FK
+        timestamp delivered_at
+        timestamp read_at
         timestamp inserted_at
+    }
+
+    message_reads {
+        bigint message_id FK
+        bigint user_id FK
+        timestamp read_at
     }
 
     telegram_tokens {
@@ -139,10 +149,22 @@ erDiagram
         timestamp expires_at
     }
 
+    push_subscriptions {
+        bigint id PK
+        bigint user_id FK
+        string endpoint
+        string p256dh
+        string auth
+        timestamp inserted_at
+    }
+
     users ||--o{ room_members : "has many"
     rooms ||--o{ room_members : "has many"
     users ||--o{ messages : "sends"
     rooms ||--o{ messages : "contains"
+    messages ||--o{ message_reads : "tracked by"
+    users ||--o{ message_reads : "reads"
+    users ||--o{ push_subscriptions : "has many"
 ```
 
 ### Relationships
@@ -150,7 +172,109 @@ erDiagram
 - **users ↔ rooms**: many-to-many through `room_members`
 - **rooms → messages**: one-to-many, a room contains many messages
 - **users → messages**: one-to-many, a user sends many messages
+- **messages → message_reads**: tracks which users have read each message (for group chats)
+- **users → push_subscriptions**: Web Push endpoints for notifications
 - **telegram_tokens**: standalone, linked to user by `telegram_user` JSONB data
+
+## Message Delivery Statuses
+
+Every message has a status visible to the sender:
+
+| Status | Icon | Meaning |
+|--------|------|---------|
+| `sent` | &#10003; | Server received and saved the message |
+| `delivered` | &#10003;&#10003; | Recipient's client received the message |
+| `read` | &#10003;&#10003; (blue) | Recipient opened the chat and saw the message |
+
+```mermaid
+sequenceDiagram
+    participant A as Sender
+    participant S as Phoenix Server
+    participant B as Recipient
+
+    A->>S: push "new_msg" {body, client_id}
+    S->>S: Save to DB (status: sent)
+    S->>A: reply "msg_saved" {id, status: sent}
+    Note over A: Shows ✓
+
+    S->>B: broadcast "new_msg" {id, body, sender}
+    B->>S: push "msg_delivered" {id}
+    S->>S: Update status → delivered
+    S->>A: broadcast "msg_status" {id, status: delivered}
+    Note over A: Shows ✓✓
+
+    Note over B: User opens chat
+    B->>S: push "msg_read" {ids}
+    S->>S: Update status → read
+    S->>A: broadcast "msg_status" {ids, status: read}
+    Note over A: Shows ✓✓ (blue)
+```
+
+In group chats, `message_reads` table tracks per-user read status. The message shows "read" when all members have seen it.
+
+## Offline Message Queue
+
+When the connection drops, messages don't get lost — they queue locally and send automatically on reconnect.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant SW as Service Worker
+    participant IDB as IndexedDB
+    participant S as Phoenix Server
+
+    Note over U,S: Connection lost
+
+    U->>SW: Send message
+    SW->>IDB: Store in outbox queue
+    SW->>U: Show ✓ (pending, gray)
+
+    Note over U,S: Connection restored
+
+    SW->>IDB: Read outbox queue
+    loop For each queued message
+        SW->>S: push "new_msg" {body, client_id}
+        S->>S: Deduplicate by client_id
+        S->>SW: reply "msg_saved" {id}
+        SW->>IDB: Remove from outbox
+        SW->>U: Update ✓ (sent)
+    end
+```
+
+Key details:
+- Each message gets a `client_id` (UUID) before sending — used for deduplication on the server
+- IndexedDB stores the outbox queue — survives browser restarts
+- Service Worker handles reconnection and queue flush
+- Server ignores duplicate `client_id` values — safe to retry
+
+## Smart Push Notifications
+
+Notifications show the sender's name and message preview instead of generic "new message" text.
+
+```mermaid
+sequenceDiagram
+    participant A as Sender
+    participant S as Phoenix Server
+    participant WP as Web Push API
+    participant B as Recipient (offline)
+
+    A->>S: push "new_msg" {body}
+    S->>S: Save message
+    S->>S: Check: is recipient online? (Presence)
+    Note over S: Recipient is offline
+
+    S->>S: Build notification payload
+    S->>WP: Send push {title: "Мама", body: "Как ты там? Звони..."}
+    WP->>B: System notification with preview
+    Note over B: "Мама: Как ты там? Звони когда освободишься"
+```
+
+Notification features:
+- **Sender name as title** — you see who wrote immediately
+- **Message preview in body** — truncated to ~100 chars
+- **Click opens the specific chat** — not just the app home page
+- **Grouped by room** — multiple messages from one chat stack into one notification
+- Uses standard Web Push API — works on Android, desktop browsers; iOS Safari 16.4+
 
 ## WebRTC Signaling Flow
 
@@ -198,37 +322,13 @@ sequenceDiagram
 6. Browser establishes a direct peer-to-peer connection
 7. Audio/video flows directly between browsers, encrypted with DTLS-SRTP
 
-## Authentication Flow (Telegram)
+## Authentication & Invites
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant B as Browser
-    participant S as Phoenix Server
-    participant T as Telegram Bot
-
-    U->>T: Opens invite link → starts bot
-    T->>U: "Welcome! Here is your login token: ABC123"
-    Note over T: Token stored in DB with expiry
-
-    U->>B: Opens blocknot.example.com
-    B->>S: GET /login
-    S->>B: Login page with token input
-
-    U->>B: Enters token "ABC123"
-    B->>S: POST /auth/telegram {token: "ABC123"}
-    S->>S: Lookup token in DB
-    S->>S: Check not expired, not used
-    S->>S: Create/find user from telegram_user data
-    S->>S: Mark token as used
-    S->>B: Set session cookie, redirect to /chat
-
-    Note over U,B: User is now authenticated
-```
+See [auth.md](auth.md) for the full authentication and invite system documentation.
 
 ### Why Telegram?
 
 - No passwords to remember or leak
 - No email verification flow
 - Telegram bots are easy to set up and free
-- Simple UX — users just enter a token
+- One-click login via Telegram Login Widget

@@ -1,17 +1,32 @@
 # BlockNot
 
-A learning project for exploring Elixir/Phoenix — a self-hosted chat application with voice calls and Telegram-based authentication.
+Self-hosted messenger for family and friends. Built with Elixir/Phoenix and WebRTC.
 
 ## About
 
-BlockNot is a pet project built to learn Phoenix framework features: LiveView, Channels, Presence, and PubSub. The name comes from the Russian word "Блокнот" (notebook).
+BlockNot is a pet project built to learn Phoenix framework features: LiveView, Channels, Presence, PubSub, and WebRTC. The name comes from the Russian word "Блокнот" (notebook).
 
-## Features
+## MVP Features
 
-- **Real-time chat** — text messages, image sharing, online presence, message history via Phoenix Channels
+- **Telegram-style UI** — dark theme, mobile-first design with chat bubbles and typing indicators
+- **Real-time chat** — text messages, online presence, message history via Phoenix Channels
 - **Voice & video calls** — peer-to-peer WebRTC, DTLS-SRTP encrypted
-- **Telegram login** — passwordless authentication via one-time token from a Telegram bot
-- **PWA** — installable from the browser, push notifications, offline support
+- **Telegram login** — one-click auth via Telegram Login Widget + invite links
+- **Deploy** — Kamal 2 on Hetzner VPS with SSL
+
+## Roadmap
+
+After deploy — by priority:
+
+| Priority | Feature | Docs |
+|----------|---------|------|
+| 1 | Message statuses (sent / delivered / read) | [architecture.md](docs/architecture.md) |
+| 2 | Reply, edit, delete messages | [chat-features.md](docs/chat-features.md) |
+| 3 | Date separators, last seen | [chat-features.md](docs/chat-features.md) |
+| 4 | PWA — install as app + push notifications | [pwa.md](docs/pwa.md) |
+| 5 | Offline message queue | [architecture.md](docs/architecture.md) |
+| 6 | Link previews (OpenGraph) | [chat-features.md](docs/chat-features.md) |
+| 7 | Context menu, swipe-to-reply | [chat-features.md](docs/chat-features.md) |
 
 ## Tech Stack
 
@@ -21,9 +36,8 @@ BlockNot is a pet project built to learn Phoenix framework features: LiveView, C
 | Database | PostgreSQL + Ecto |
 | Real-time calls | WebRTC (browser-native, peer-to-peer) |
 | Frontend | Phoenix LiveView + minimal JS hooks |
-| PWA | Service Worker |
-| Auth | Telegram Bot (magic token) |
-| Deployment | Kamal 2 |
+| Auth | Telegram Login Widget |
+| Deployment | Kamal 2 on Hetzner VPS |
 | Encryption | HTTPS/WSS in transit, DTLS-SRTP for calls |
 
 ## Quick Start
@@ -65,44 +79,46 @@ Open [http://localhost:4000](http://localhost:4000) in your browser.
 1. Open [@BotFather](https://t.me/BotFather) in Telegram
 2. Send `/newbot`, follow the prompts
 3. Copy the bot token to your `.env` file
-4. Set the bot's domain: `/setdomain` → your domain
+4. Set the bot's domain: Bot Settings → Domain → `chat.example.com`
 
-Users authenticate by:
-1. Opening an invite link that leads to the bot
-2. The bot sends a one-time token
-3. Entering the token on the website → done, logged in
+### How users join
 
-## Deployment with Kamal
+1. You create an invite link in BlockNot settings
+2. Share the link with a friend
+3. Friend opens the link → clicks **"Log in with Telegram"**
+4. One click → in the chat
+
+See [docs/auth.md](docs/auth.md) for details.
+
+## Deployment
 
 ```bash
-# First deploy
-kamal setup
-
-# Subsequent deploys
-kamal deploy
+kamal setup    # first deploy
+kamal deploy   # subsequent deploys
 ```
 
-See [docs/deployment.md](docs/deployment.md) for detailed instructions.
+See [docs/deployment.md](docs/deployment.md) for Hetzner + SSL setup.
 
 ## Security
 
 - All traffic encrypted via HTTPS/WSS
 - WebRTC calls encrypted via DTLS-SRTP (mandatory browser standard)
-- No end-to-end encryption in v1 (planned for v2)
-
-## Limitations (v1)
-
-- No end-to-end encryption yet
-- No native mobile apps — PWA only
-- No phone/PSTN calls — browser-to-browser only
-- Designed for small groups (family, close friends)
-- This is a learning project, not production-grade software
+- No end-to-end encryption yet (planned)
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — system design, WebRTC flow, auth flow, database schema
+**MVP:**
+- [UI Design](docs/ui-design.md) — mobile-first Telegram-style UI, LiveView components, CSS
+- [Auth & Invites](docs/auth.md) — Telegram Login Widget, invite links
+- [Architecture](docs/architecture.md) — system design, WebRTC signaling, database schema
 - [Setup Guide](docs/setup.md) — development environment from scratch
-- [Deployment](docs/deployment.md) — VPS + Kamal + SSL
+- [Deployment](docs/deployment.md) — Hetzner VPS + Kamal + SSL
+
+**Post-launch:**
+- [Chat Features](docs/chat-features.md) — reply, edit, delete, link previews, context menu
+- [PWA](docs/pwa.md) — install as app, push notifications, offline support
+
+**Other:**
 - [README на русском](docs/ru/README.md)
 
 ## Contributing
